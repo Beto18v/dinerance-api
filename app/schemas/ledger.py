@@ -116,6 +116,7 @@ class LedgerBalanceAccountRead(BaseModel):
     financial_account_name: str
     currency: str | None = None
     balance: Decimal
+    balance_in_base_currency: Decimal | None = None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -126,6 +127,7 @@ class LedgerBalanceAccountRead(BaseModel):
 class LedgerBalancesRead(BaseModel):
     currency: str | None = None
     consolidated_balance: Decimal
+    skipped_transactions: int = 0
     accounts: list[LedgerBalanceAccountRead]
 
     @field_validator("currency", mode="before")

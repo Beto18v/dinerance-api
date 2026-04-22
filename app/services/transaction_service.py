@@ -23,7 +23,6 @@ from app.services.ledger_shared import (
     PUBLIC_TRANSACTION_TYPES,
     ensure_transaction_amount_is_positive,
     ensure_transaction_currency_matches_financial_account_currency,
-    ensure_transaction_currency_matches_user_base_currency,
     get_transaction_for_user,
     resolve_financial_account,
 )
@@ -43,10 +42,6 @@ def create_transaction(
         user_id=user_id,
         user=user,
         financial_account_id=transaction_data.financial_account_id,
-    )
-    ensure_transaction_currency_matches_user_base_currency(
-        user_base_currency=user.base_currency,
-        transaction_currency=transaction_data.currency,
     )
     ensure_transaction_currency_matches_financial_account_currency(
         financial_account=financial_account,
@@ -219,10 +214,6 @@ def update_transaction(
         if field in updates:
             setattr(transaction, field, updates[field])
 
-    ensure_transaction_currency_matches_user_base_currency(
-        user_base_currency=user.base_currency,
-        transaction_currency=transaction.currency,
-    )
     ensure_transaction_currency_matches_financial_account_currency(
         financial_account=financial_account,
         transaction_currency=transaction.currency,

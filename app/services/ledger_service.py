@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.models.category import Category
 from app.models.financial_account import FinancialAccount
-from app.models.transaction import BalanceDirection, Transaction
+from app.models.transaction import BalanceDirection, Transaction, TransactionType
 from app.schemas.ledger import (
     LedgerActivityRead,
     LedgerBalanceAccountRead,
@@ -51,6 +51,57 @@ def get_ledger_balances(
         row.financial_account_id: _normalize_decimal(row.balance)
         for row in rows
     }
+    usable_signed_base_amount = case(
+        (
+            and_(
+                Transaction.base_currency == user.base_currency,
+                Transaction.amount_in_base_currency.isnot(None),
+                Transaction.balance_direction == BalanceDirection.inflow,
+            ),
+            Transaction.amount_in_base_currency,
+        ),
+        (
+            and_(
+                Transaction.base_currency == user.base_currency,
+                Transaction.amount_in_base_currency.isnot(None),
+                Transaction.balance_direction == BalanceDirection.outflow,
+            ),
+            -Transaction.amount_in_base_currency,
+        ),
+        else_=None,
+    )
+    base_rows = (
+        db.query(
+            Transaction.financial_account_id,
+            func.sum(usable_signed_base_amount).label("balance_in_base_currency"),
+        )
+        .filter(Transaction.user_id == user_id)
+        .group_by(Transaction.financial_account_id)
+        .all()
+    )
+    base_balance_by_account_id = {
+        row.financial_account_id: _normalize_decimal(row.balance_in_base_currency)
+        for row in base_rows
+        if row.balance_in_base_currency is not None
+    }
+    consolidated_balance = _normalize_decimal(
+        db.query(func.coalesce(func.sum(usable_signed_base_amount), 0))
+        .filter(Transaction.user_id == user_id)
+        .scalar()
+    )
+    skipped_transactions = int(
+        db.query(
+            func.count(
+                case(
+                    (usable_signed_base_amount.is_(None), 1),
+                    else_=None,
+                )
+            )
+        )
+        .filter(Transaction.user_id == user_id)
+        .scalar()
+        or 0
+    )
 
     accounts = [
         LedgerBalanceAccountRead(
@@ -58,17 +109,15 @@ def get_ledger_balances(
             financial_account_name=account.name,
             currency=account.currency or user.base_currency,
             balance=balance_by_account_id.get(account.id, Decimal("0.00")),
+            balance_in_base_currency=base_balance_by_account_id.get(account.id),
         )
         for account in financial_accounts
     ]
-    consolidated_balance = sum(
-        (item.balance for item in accounts),
-        start=Decimal("0"),
-    )
 
     return LedgerBalancesRead(
         currency=user.base_currency,
         consolidated_balance=consolidated_balance,
+        skipped_transactions=skipped_transactions,
         accounts=accounts,
     )
 
@@ -84,12 +133,56 @@ def get_ledger_activity(
     if financial_account_id is not None:
         get_financial_account_for_user(db, user_id, financial_account_id)
 
+    return LedgerActivityRead(
+        limit=limit,
+        items=_load_ledger_rows(
+            db,
+            user_id=user_id,
+            financial_account_id=financial_account_id,
+            limit=limit,
+        ),
+    )
+
+
+def get_ledger_adjustments(
+    db: Session,
+    user_id: UUID,
+    *,
+    financial_account_id: UUID | None = None,
+    limit: int = 20,
+) -> LedgerActivityRead:
+    ensure_active_user_with_money_profile(db, user_id)
+    if financial_account_id is not None:
+        get_financial_account_for_user(db, user_id, financial_account_id)
+
+    return LedgerActivityRead(
+        limit=limit,
+        items=_load_ledger_rows(
+            db,
+            user_id=user_id,
+            financial_account_id=financial_account_id,
+            limit=limit,
+            transaction_types=(TransactionType.adjustment,),
+        ),
+    )
+
+
+def _load_ledger_rows(
+    db: Session,
+    *,
+    user_id: UUID,
+    financial_account_id: UUID | None,
+    limit: int,
+    transaction_types: tuple[TransactionType, ...] | None = None,
+):
     counterparty_transaction = aliased(Transaction)
     counterparty_account = aliased(FinancialAccount)
 
     filters = [Transaction.user_id == user_id]
     if financial_account_id is not None:
         filters.append(Transaction.financial_account_id == financial_account_id)
+    if transaction_types is not None:
+        filters.append(Transaction.transaction_type.in_(transaction_types))
 
     rows = (
         db.query(
@@ -136,25 +229,22 @@ def get_ledger_activity(
         .all()
     )
 
-    return LedgerActivityRead(
-        limit=limit,
-        items=[
-            serialize_ledger_movement(
-                transaction,
-                category_name=category_name,
-                financial_account_name=financial_account_name,
-                counterparty_financial_account_id=counterparty_financial_account_id,
-                counterparty_financial_account_name=counterparty_financial_account_name,
-            )
-            for (
-                transaction,
-                category_name,
-                financial_account_name,
-                counterparty_financial_account_id,
-                counterparty_financial_account_name,
-            ) in rows
-        ],
-    )
+    return [
+        serialize_ledger_movement(
+            transaction,
+            category_name=category_name,
+            financial_account_name=financial_account_name,
+            counterparty_financial_account_id=counterparty_financial_account_id,
+            counterparty_financial_account_name=counterparty_financial_account_name,
+        )
+        for (
+            transaction,
+            category_name,
+            financial_account_name,
+            counterparty_financial_account_id,
+            counterparty_financial_account_name,
+        ) in rows
+    ]
 
 
 def _normalize_decimal(value: Decimal | int | float | None) -> Decimal:

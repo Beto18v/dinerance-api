@@ -124,23 +124,83 @@ def test_transaction_snapshot_and_balance_use_identity_base_currency(client):
     }
 
 
-def test_transaction_rejects_currency_different_from_user_base_currency(client):
+def test_foreign_currency_account_transaction_uses_fx_snapshot_for_base_analytics(
+    client,
+    db_session,
+):
     create_configured_user(client)
-
     expense_category = create_category(client, name="Food", direction="expense")
+    usd_account = client.post(
+        "/financial-accounts/",
+        json={"name": "USD wallet", "currency": "USD"},
+    )
+    assert usd_account.status_code == 200
+
+    db_session.add(
+        ExchangeRate(
+            base_currency="USD",
+            quote_currency="COP",
+            rate_date=date(2026, 3, 1),
+            rate=Decimal("4000.00000000"),
+            source="manual_test",
+        )
+    )
+    db_session.commit()
 
     usd_expense = client.post(
         "/transactions/",
         json={
             "category_id": expense_category["id"],
+            "financial_account_id": usd_account.json()["id"],
             "amount": "10.00",
             "currency": "USD",
+            "description": "Coffee",
+            "occurred_at": datetime(2026, 3, 3, 12, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+    assert usd_expense.status_code == 200
+    assert usd_expense.json()["base_currency"] == "COP"
+    assert usd_expense.json()["fx_rate"] == "4000.00000000"
+    assert usd_expense.json()["fx_rate_source"] == "manual_test"
+    assert usd_expense.json()["amount_in_base_currency"] == "40000.00"
+
+    balance = client.get("/balance/monthly?year=2026&month=3")
+    assert balance.status_code == 200
+    assert balance.json()["current"] == {
+        "month_start": "2026-03-01",
+        "currency": "COP",
+        "income": "0.00",
+        "expense": "40000.00",
+        "balance": "-40000.00",
+        "skipped_transactions": 0,
+    }
+
+
+def test_transaction_rejects_currency_different_from_financial_account_currency(client):
+    create_configured_user(client)
+    expense_category = create_category(client, name="Food", direction="expense")
+    usd_account = client.post(
+        "/financial-accounts/",
+        json={"name": "USD wallet", "currency": "USD"},
+    )
+    assert usd_account.status_code == 200
+
+    cop_expense = client.post(
+        "/transactions/",
+        json={
+            "category_id": expense_category["id"],
+            "financial_account_id": usd_account.json()["id"],
+            "amount": "10.00",
+            "currency": "COP",
             "description": "Coffee",
             "occurred_at": datetime(2026, 3, 11, 12, tzinfo=timezone.utc).isoformat(),
         },
     )
-    assert usd_expense.status_code == 409
-    assert usd_expense.json()["detail"] == "Transactions must use the user's base currency"
+    assert cop_expense.status_code == 409
+    assert (
+        cop_expense.json()["detail"]
+        == "Transactions must use the financial account currency"
+    )
 
 
 def test_base_currency_cannot_change_after_transactions_exist(client):

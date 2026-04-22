@@ -10,9 +10,9 @@ from app.models.transaction import BalanceDirection, Transaction, TransactionTyp
 from app.schemas.ledger import TransferCreate, TransferRead
 from app.services.ledger_shared import (
     build_ledger_transaction,
+    ensure_financial_accounts_share_currency,
     ensure_transaction_amount_is_positive,
     ensure_transaction_currency_matches_financial_account_currency,
-    ensure_transaction_currency_matches_user_base_currency,
     resolve_financial_account,
     serialize_ledger_movement,
 )
@@ -49,9 +49,9 @@ def create_transfer(
         financial_account_id=transfer_data.destination_financial_account_id,
     )
 
-    ensure_transaction_currency_matches_user_base_currency(
-        user_base_currency=user.base_currency,
-        transaction_currency=transfer_data.currency,
+    ensure_financial_accounts_share_currency(
+        source_account=source_account,
+        destination_account=destination_account,
     )
     ensure_transaction_currency_matches_financial_account_currency(
         financial_account=source_account,

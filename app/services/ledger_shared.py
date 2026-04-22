@@ -70,6 +70,22 @@ def ensure_transaction_currency_matches_financial_account_currency(
         )
 
 
+def ensure_financial_accounts_share_currency(
+    *,
+    source_account: FinancialAccount,
+    destination_account: FinancialAccount,
+) -> None:
+    if (
+        source_account.currency is not None
+        and destination_account.currency is not None
+        and source_account.currency != destination_account.currency
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Transfers between accounts with different currencies are not supported yet",
+        )
+
+
 def resolve_financial_account(
     db: Session,
     *,

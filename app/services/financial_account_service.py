@@ -44,7 +44,10 @@ def create_financial_account(
     account = FinancialAccount(
         user_id=user_id,
         name=account_data.name,
-        currency=user.base_currency,
+        currency=_resolve_account_currency(
+            requested_currency=account_data.currency,
+            fallback_currency=user.base_currency,
+        ),
         is_default=False,
     )
     db.add(account)
@@ -68,11 +71,20 @@ def update_financial_account(
     account = get_financial_account_for_user(db, user_id, account_id)
     updates = account_data.model_dump(exclude_unset=True)
 
-    if account.currency != user.base_currency:
-        account.currency = user.base_currency
-
     if "name" in updates and updates["name"] is not None:
         account.name = updates["name"]
+
+    if "currency" in updates:
+        requested_currency = updates["currency"]
+        if requested_currency is None:
+            raise HTTPException(status_code=422, detail="Currency is required")
+        if requested_currency != account.currency:
+            if financial_account_has_transactions(db, account.id):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Financial account currency cannot change after transactions exist",
+                )
+            account.currency = requested_currency
 
     if updates.get("is_default") is True:
         _set_default_financial_account(db, user_id, account)
@@ -165,7 +177,7 @@ def ensure_default_financial_account(
     default_account: FinancialAccount | None = None
 
     for account in accounts:
-        if account.currency != user.base_currency:
+        if account.currency is None and user.base_currency is not None:
             account.currency = user.base_currency
             changed = True
 
@@ -184,6 +196,26 @@ def ensure_default_financial_account(
             changed = True
 
     return default_account, changed
+
+
+def sync_default_financial_account_currency_with_user_base_currency(
+    db: Session,
+    user: User,
+    *,
+    previous_base_currency: str | None,
+) -> bool:
+    default_account, changed = ensure_default_financial_account(db, user)
+    if user.base_currency is None:
+        return changed
+
+    if (
+        default_account.currency is None
+        or default_account.currency == previous_base_currency
+    ) and default_account.currency != user.base_currency:
+        default_account.currency = user.base_currency
+        return True
+
+    return changed
 
 
 def financial_account_has_transactions(db: Session, account_id: UUID) -> bool:
@@ -257,3 +289,13 @@ def _list_user_financial_accounts(
         FinancialAccount.created_at.asc(),
         FinancialAccount.id.asc(),
     ).all()
+
+
+def _resolve_account_currency(
+    *,
+    requested_currency: str | None,
+    fallback_currency: str | None,
+) -> str | None:
+    if requested_currency is not None:
+        return requested_currency
+    return fallback_currency

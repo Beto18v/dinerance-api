@@ -39,11 +39,15 @@ def test_financial_account_crud_and_default_switching(client):
 
     created_wallet = client.post(
         "/financial-accounts/",
-        json={"name": "  Daily   wallet  ", "is_default": False},
+        json={
+            "name": "  Daily   wallet  ",
+            "currency": "USD",
+            "is_default": False,
+        },
     )
     assert created_wallet.status_code == 200
     assert created_wallet.json()["name"] == "Daily wallet"
-    assert created_wallet.json()["currency"] == "COP"
+    assert created_wallet.json()["currency"] == "USD"
     assert created_wallet.json()["is_default"] is False
 
     updated_wallet = client.put(
@@ -189,3 +193,35 @@ def test_list_transactions_can_filter_by_financial_account(client):
         "expense_totals": [{"currency": "COP", "amount": "18.00"}],
         "balance_totals": [{"currency": "COP", "amount": "-18.00"}],
     }
+
+
+def test_financial_account_currency_cannot_change_after_transactions_exist(client):
+    created = create_configured_user(client)
+    assert created.status_code == 200
+
+    main_account = client.get("/financial-accounts/").json()[0]
+    category = create_category(client, name="Utilities")
+    assert category.status_code == 200
+
+    created_transaction = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "financial_account_id": main_account["id"],
+            "amount": "15.25",
+            "currency": "COP",
+            "description": "Water",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert created_transaction.status_code == 200
+
+    updated = client.put(
+        f"/financial-accounts/{main_account['id']}",
+        json={"currency": "USD"},
+    )
+    assert updated.status_code == 409
+    assert (
+        updated.json()["detail"]
+        == "Financial account currency cannot change after transactions exist"
+    )

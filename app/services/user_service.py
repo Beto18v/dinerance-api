@@ -9,7 +9,10 @@ from app.models.user import User
 from app.models.transaction import Transaction
 from app.schemas.user import UserBootstrap, UserCreate, UserUpdate
 from app.services.exchange_rate_service import refresh_transaction_fx_snapshots_for_user
-from app.services.financial_account_service import ensure_default_financial_account
+from app.services.financial_account_service import (
+    ensure_default_financial_account,
+    sync_default_financial_account_currency_with_user_base_currency,
+)
 
 DEFAULT_USER_NAME = "User"
 
@@ -235,19 +238,30 @@ def _apply_user_updates(
         if base_currency is None:
             raise HTTPException(status_code=422, detail="Base currency is required")
 
+        previous_base_currency = user.base_currency
         if user.base_currency != base_currency:
-            if user.base_currency is not None and _user_has_transactions(db, user.id):
+            has_transactions = _user_has_transactions(db, user.id)
+            if previous_base_currency is not None and has_transactions:
                 raise HTTPException(
                     status_code=409,
                     detail="Base currency cannot change after transactions exist",
                 )
 
-            first_base_currency_assignment = user.base_currency is None
+            first_base_currency_assignment = previous_base_currency is None
             user.base_currency = base_currency
             changed = True
 
-            if first_base_currency_assignment and _user_has_transactions(db, user.id):
+            if first_base_currency_assignment and has_transactions:
                 refresh_transaction_fx_snapshots_for_user(db, user)
+            elif not first_base_currency_assignment:
+                changed = (
+                    sync_default_financial_account_currency_with_user_base_currency(
+                        db,
+                        user,
+                        previous_base_currency=previous_base_currency,
+                    )
+                    or changed
+                )
 
     return changed
 

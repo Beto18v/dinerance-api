@@ -8,6 +8,7 @@ from app.core.finance import assume_utc_if_naive, validate_currency_code
 
 class FinancialAccountCreate(BaseModel):
     name: str
+    currency: str | None = None
     is_default: bool = False
 
     @field_validator("name", mode="before")
@@ -18,9 +19,15 @@ class FinancialAccountCreate(BaseModel):
             raise ValueError("Financial account name is required")
         return normalized
 
+    @field_validator("currency", mode="before")
+    @classmethod
+    def validate_currency(cls, value: str | None) -> str | None:
+        return validate_currency_code(value)
+
 
 class FinancialAccountUpdate(BaseModel):
     name: str | None = None
+    currency: str | None = None
     is_default: bool | None = None
 
     @field_validator("name", mode="before")
@@ -32,6 +39,11 @@ class FinancialAccountUpdate(BaseModel):
         if not normalized:
             raise ValueError("Financial account name is required")
         return normalized
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def validate_currency(cls, value: str | None) -> str | None:
+        return validate_currency_code(value)
 
 
 class FinancialAccountRead(BaseModel):

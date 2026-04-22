@@ -8,7 +8,6 @@ from app.services.ledger_shared import (
     build_ledger_transaction,
     ensure_transaction_amount_is_positive,
     ensure_transaction_currency_matches_financial_account_currency,
-    ensure_transaction_currency_matches_user_base_currency,
     get_transaction_for_user,
     resolve_financial_account,
     serialize_ledger_movement,
@@ -30,10 +29,6 @@ def create_adjustment(
         user_id=user_id,
         user=user,
         financial_account_id=adjustment_data.financial_account_id,
-    )
-    ensure_transaction_currency_matches_user_base_currency(
-        user_base_currency=user.base_currency,
-        transaction_currency=adjustment_data.currency,
     )
     ensure_transaction_currency_matches_financial_account_currency(
         financial_account=financial_account,
