@@ -62,6 +62,7 @@ class TransactionRead(BaseModel):
     id: UUID
     category_id: UUID | None = None
     financial_account_id: UUID
+    financial_account_name: str | None = None
     transaction_type: TransactionType
     transfer_group_id: UUID | None = None
     amount: Decimal

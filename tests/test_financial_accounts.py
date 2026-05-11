@@ -105,17 +105,26 @@ def test_financial_account_delete_rules_and_default_reassignment(client):
     deleting_account_with_transactions = client.delete(
         f"/financial-accounts/{main_account['id']}"
     )
-    assert deleting_account_with_transactions.status_code == 409
-    assert (
-        deleting_account_with_transactions.json()["detail"]
-        == "Financial account has 1 transaction"
-    )
+    assert deleting_account_with_transactions.status_code == 204  # Now allows soft delete
 
     savings_account = client.post(
         "/financial-accounts/",
         json={"name": "Savings", "is_default": False},
     )
     assert savings_account.status_code == 200
+
+    # Verify account is no longer listed
+    listed_after_delete_with_tx = client.get("/financial-accounts/")
+    assert listed_after_delete_with_tx.status_code == 200
+    account_ids = {item["id"] for item in listed_after_delete_with_tx.json()}
+    assert main_account["id"] not in account_ids  # Soft deleted, not listed
+    assert wallet_account.json()["id"] in account_ids
+    assert savings_account.json()["id"] in account_ids
+
+    # Verify transaction still exists and references the deleted account
+    transaction_check = client.get(f"/transactions/{created_transaction.json()['id']}")
+    assert transaction_check.status_code == 200
+    assert transaction_check.json()["financial_account_id"] == main_account["id"]
 
     set_wallet_default = client.put(
         f"/financial-accounts/{wallet_account.json()['id']}",
@@ -130,11 +139,10 @@ def test_financial_account_delete_rules_and_default_reassignment(client):
     listed_after_delete = client.get("/financial-accounts/")
     assert listed_after_delete.status_code == 200
     assert {item["id"] for item in listed_after_delete.json()} == {
-        main_account["id"],
-        savings_account.json()["id"],
+        savings_account.json()["id"],  # Only savings left, becomes default
     }
     assert [item["id"] for item in listed_after_delete.json() if item["is_default"]] == [
-        main_account["id"]
+        savings_account.json()["id"]
     ]
 
 
@@ -195,7 +203,62 @@ def test_list_transactions_can_filter_by_financial_account(client):
     }
 
 
-def test_financial_account_currency_cannot_change_after_transactions_exist(client):
+def test_financial_account_soft_delete_behavior(client):
+    created = create_configured_user(client)
+    assert created.status_code == 200
+
+    # Create an extra account
+    extra_account = client.post(
+        "/financial-accounts/",
+        json={"name": "Extra", "is_default": False},
+    )
+    assert extra_account.status_code == 200
+
+    category = create_category(client)
+    assert category.status_code == 200
+
+    # Create a transaction in the extra account
+    transaction = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "financial_account_id": extra_account.json()["id"],
+            "amount": "10.00",
+            "currency": "COP",
+            "description": "Test",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert transaction.status_code == 200
+
+    # Soft delete the extra account
+    delete_response = client.delete(f"/financial-accounts/{extra_account.json()['id']}")
+    assert delete_response.status_code == 204
+
+    # Verify account is not in list anymore
+    listed = client.get("/financial-accounts/")
+    assert listed.status_code == 200
+    account_ids = {item["id"] for item in listed.json()}
+    assert extra_account.json()["id"] not in account_ids
+
+    # Try to create a new transaction in the deleted account - should fail
+    new_transaction = client.post(
+        "/transactions/",
+        json={
+            "category_id": category.json()["id"],
+            "financial_account_id": extra_account.json()["id"],
+            "amount": "5.00",
+            "currency": "COP",
+            "description": "Should fail",
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    assert new_transaction.status_code == 404  # Account not found
+
+    # But the existing transaction should still be accessible and reference the deleted account
+    existing_transaction = client.get(f"/transactions/{transaction.json()['id']}")
+    assert existing_transaction.status_code == 200
+    assert existing_transaction.json()["financial_account_id"] == extra_account.json()["id"]
     created = create_configured_user(client)
     assert created.status_code == 200
 

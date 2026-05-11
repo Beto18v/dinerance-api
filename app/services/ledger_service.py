@@ -188,11 +188,17 @@ def _load_ledger_rows(
         db.query(
             Transaction,
             Category.name.label("category_name"),
-            FinancialAccount.name.label("financial_account_name"),
+            case(
+                (FinancialAccount.deleted_at.isnot(None), func.concat(FinancialAccount.name, ' eliminada')),
+                else_=FinancialAccount.name
+            ).label("financial_account_name"),
             counterparty_transaction.financial_account_id.label(
                 "counterparty_financial_account_id"
             ),
-            counterparty_account.name.label("counterparty_financial_account_name"),
+            case(
+                (counterparty_account.deleted_at.isnot(None), func.concat(counterparty_account.name, ' eliminada')),
+                else_=counterparty_account.name
+            ).label("counterparty_financial_account_name"),
         )
         .join(
             FinancialAccount,

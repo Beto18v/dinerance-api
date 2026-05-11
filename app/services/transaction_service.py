@@ -7,12 +7,14 @@ from sqlalchemy import and_, case, distinct, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.category import Category, CategoryDirection
+from app.models.financial_account import FinancialAccount
 from app.models.transaction import BalanceDirection, Transaction, TransactionType
 from app.schemas.transaction import (
     TransactionAggregateTotal,
     TransactionCreate,
     TransactionListPage,
     TransactionListSummary,
+    TransactionRead,
     TransactionUpdate,
 )
 from app.services.exchange_rate_service import (
@@ -125,7 +127,13 @@ def list_transactions(
         else None
     )
     items = (
-        query.order_by(
+        query.add_columns(
+            case(
+                (FinancialAccount.deleted_at.isnot(None), func.concat(FinancialAccount.name, ' eliminada')),
+                else_=FinancialAccount.name,
+            ).label('financial_account_name')
+        )
+        .order_by(
             Transaction.occurred_at.desc(),
             Transaction.created_at.desc(),
             Transaction.id.desc(),
@@ -136,7 +144,7 @@ def list_transactions(
     )
 
     return TransactionListPage(
-        items=items,
+        items=[TransactionRead(**transaction.__dict__, financial_account_name=financial_account_name) for transaction, financial_account_name in items],
         total_count=total_count,
         limit=limit,
         offset=offset,
@@ -260,6 +268,13 @@ def _build_transactions_query(
             and_(
                 Transaction.category_id == Category.id,
                 Category.user_id == user_id,
+            ),
+        )
+        .outerjoin(
+            FinancialAccount,
+            and_(
+                Transaction.financial_account_id == FinancialAccount.id,
+                FinancialAccount.user_id == user_id,
             ),
         )
         .filter(

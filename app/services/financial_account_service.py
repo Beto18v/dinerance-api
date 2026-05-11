@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -113,23 +114,14 @@ def delete_financial_account(db: Session, user_id: UUID, account_id: UUID) -> No
             detail="At least one financial account is required",
         )
 
-    transaction_count = get_financial_account_transaction_count(db, account.id)
-    if transaction_count > 0:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Financial account has {transaction_count} transaction"
-                if transaction_count == 1
-                else f"Financial account has {transaction_count} transactions"
-            ),
-        )
-
     replacement_default = (
         _select_replacement_default_account(db, remaining_accounts)
         if account.is_default
         else None
     )
-    db.delete(account)
+
+    # Soft delete: mark as deleted instead of physically deleting
+    account.deleted_at = datetime.now(timezone.utc)
     db.flush()
 
     if replacement_default is not None:
@@ -148,6 +140,7 @@ def get_financial_account_for_user(
         .filter(
             FinancialAccount.id == account_id,
             FinancialAccount.user_id == user_id,
+            FinancialAccount.deleted_at.is_(None),
         )
         .first()
     )
@@ -280,7 +273,10 @@ def _list_user_financial_accounts(
     *,
     exclude_account_id: UUID | None = None,
 ) -> list[FinancialAccount]:
-    query = db.query(FinancialAccount).filter(FinancialAccount.user_id == user_id)
+    query = db.query(FinancialAccount).filter(
+        FinancialAccount.user_id == user_id,
+        FinancialAccount.deleted_at.is_(None),
+    )
     if exclude_account_id is not None:
         query = query.filter(FinancialAccount.id != exclude_account_id)
 

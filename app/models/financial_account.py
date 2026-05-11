@@ -58,6 +58,12 @@ class FinancialAccount(Base):
         onupdate=func.now(),
     )
 
+    # Timestamp for soft deletion, nullable to indicate active records
+    deleted_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     user = relationship("User", back_populates="financial_accounts")
 
     transactions = relationship(
