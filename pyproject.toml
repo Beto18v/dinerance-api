@@ -23,4 +23,25 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.2",
     "sqlalchemy2-stubs>=0.0.2a38",
+    "ruff>=0.11.0",
+    "black>=25.0",
+    "mypy>=1.15.0",
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = true

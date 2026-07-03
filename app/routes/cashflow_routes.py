@@ -24,7 +24,7 @@ def get_cashflow_forecast_endpoint(
 
 @router.get("/safe-to-spend", response_model=SafeToSpendRead)
 def get_safe_to_spend_endpoint(
-    horizon_days: int = Query(30, ge=1, le=365),
+    month_offset: int = Query(0, ge=0, le=11),
     user_id=Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -32,5 +32,5 @@ def get_safe_to_spend_endpoint(
     return get_safe_to_spend(
         db,
         user_id,
-        horizon_days=horizon_days,
+        month_offset=month_offset,
     )

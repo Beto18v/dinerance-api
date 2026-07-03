@@ -10,8 +10,9 @@ from app.core.finance import validate_currency_code
 
 
 class ForecastWindowRead(BaseModel):
-    horizon_days: int
-    window_end_date: date
+    month_offset: int
+    month_label: str
+    days_in_window: int
     scheduled_payments_count: int
     confirmed_obligations_total: Decimal
     projected_balance: Decimal
@@ -23,8 +24,9 @@ class ForecastWindowRead(BaseModel):
 
 class SafeToSpendRead(BaseModel):
     reference_date: date
-    horizon_days: int
-    window_end_date: date
+    month_offset: int
+    month_label: str
+    days_in_window: int
     currency: str
     current_balance: Decimal
     scheduled_payments_count: int

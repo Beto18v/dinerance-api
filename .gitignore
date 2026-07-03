@@ -10,9 +10,14 @@ wheels/
 .venv
 
 # Environment variables
-.env
+.env*
 !.env.example
 .env.local.example
 
 # dependencies
 /node_modules
+
+# caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

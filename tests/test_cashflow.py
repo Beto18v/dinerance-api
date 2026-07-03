@@ -1,5 +1,9 @@
 from datetime import date
 
+import pytest
+
+from app.services.cashflow_service import _build_month_window
+
 
 def create_configured_user(client, *, timezone_name: str = "UTC"):
     response = client.post(
@@ -52,23 +56,25 @@ def create_obligation(
     return response.json()
 
 
-def test_cashflow_forecast_projects_30_60_90_days_from_current_balance_and_confirmed_obligations(
+def setup_user_with_balance(
     client,
     monkeypatch,
+    reference_date: date,
+    *,
+    balance: str = "1000.00",
 ):
     cleanup = client.delete("/users/me")
     assert cleanup.status_code in (204, 404)
 
     create_configured_user(client, timezone_name="America/Bogota")
     default_account = client.get("/financial-accounts/").json()[0]
-    fixed_costs = create_category(client, name="Fixed costs", direction="expense")
 
     opening_balance = client.post(
         "/adjustments/",
         json={
             "financial_account_id": default_account["id"],
             "balance_direction": "in",
-            "amount": "1500.00",
+            "amount": balance,
             "currency": "COP",
             "description": "Opening balance",
             "occurred_at": "2026-04-01T12:00:00Z",
@@ -76,164 +82,165 @@ def test_cashflow_forecast_projects_30_60_90_days_from_current_balance_and_confi
     )
     assert opening_balance.status_code == 200
 
-    create_obligation(
-        client,
-        name="Rent",
-        amount="500.00",
-        cadence="monthly",
-        next_due_date="2026-04-15",
-        category_id=fixed_costs["id"],
-        expected_financial_account_id=default_account["id"],
-    )
-    create_obligation(
-        client,
-        name="Gym",
-        amount="100.00",
-        cadence="biweekly",
-        next_due_date="2026-04-10",
-        category_id=fixed_costs["id"],
-    )
-    create_obligation(
-        client,
-        name="Internet",
-        amount="50.00",
-        cadence="weekly",
-        next_due_date="2026-04-12",
-        category_id=fixed_costs["id"],
-    )
-    create_obligation(
-        client,
-        name="Insurance",
-        amount="300.00",
-        cadence="monthly",
-        next_due_date="2026-06-01",
-        category_id=fixed_costs["id"],
-    )
-    create_obligation(
-        client,
-        name="Paused",
-        amount="999.00",
-        cadence="monthly",
-        next_due_date="2026-04-09",
-        category_id=fixed_costs["id"],
-        status="paused",
-    )
-
     monkeypatch.setattr(
         "app.services.cashflow_service.resolve_obligation_reference_date",
-        lambda _: date(2026, 4, 7),
+        lambda _: reference_date,
     )
+
+    return default_account
+
+
+@pytest.mark.parametrize(
+    "reference_date, month_offset, expected",
+    [
+        (date(2026, 7, 15), 0, (date(2026, 7, 15), date(2026, 7, 31), 17)),
+        (date(2026, 7, 1), 0, (date(2026, 7, 1), date(2026, 7, 31), 31)),
+        (date(2026, 7, 15), 1, (date(2026, 8, 1), date(2026, 8, 31), 31)),
+        (date(2026, 7, 15), 2, (date(2026, 9, 1), date(2026, 9, 30), 30)),
+        (date(2026, 1, 31), 1, (date(2026, 2, 1), date(2026, 2, 28), 28)),
+        (date(2028, 2, 10), 0, (date(2028, 2, 10), date(2028, 2, 29), 20)),
+        (date(2026, 4, 30), 1, (date(2026, 5, 1), date(2026, 5, 31), 31)),
+    ],
+)
+def test_build_month_window(reference_date, month_offset, expected):
+    assert _build_month_window(reference_date, month_offset) == expected
+
+
+def test_cashflow_forecast_returns_three_monthly_windows(client, monkeypatch):
+    setup_user_with_balance(client, monkeypatch, date(2026, 7, 15))
 
     response = client.get("/cashflow/forecast")
     assert response.status_code == 200
 
     data = response.json()
-    assert data["reference_date"] == "2026-04-07"
+    assert data["reference_date"] == "2026-07-15"
     assert data["currency"] == "COP"
-    assert data["current_balance"] == "1500.00"
-    assert data["safe_to_spend"] == {
-        "reference_date": "2026-04-07",
-        "horizon_days": 30,
-        "window_end_date": "2026-05-07",
-        "currency": "COP",
-        "current_balance": "1500.00",
-        "scheduled_payments_count": 7,
-        "confirmed_obligations_total": "900.00",
-        "projected_balance": "600.00",
-        "safe_to_spend": "600.00",
-        "safe_to_spend_per_day": "20.00",
+    assert data["current_balance"] == "1000.00"
+
+    horizons = data["horizons"]
+    assert len(horizons) == 3
+
+    assert horizons[0] == {
+        "month_offset": 0,
+        "month_label": "Jul 2026",
+        "days_in_window": 17,
+        "scheduled_payments_count": 0,
+        "confirmed_obligations_total": "0.00",
+        "projected_balance": "1000.00",
+        "safe_to_spend": "1000.00",
+        "safe_to_spend_per_day": "58.82",
         "shortfall_amount": "0.00",
         "status": "covered",
     }
-    assert data["horizons"] == [
-        {
-            "horizon_days": 30,
-            "window_end_date": "2026-05-07",
-            "scheduled_payments_count": 7,
-            "confirmed_obligations_total": "900.00",
-            "projected_balance": "600.00",
-            "safe_to_spend": "600.00",
-            "safe_to_spend_per_day": "20.00",
-            "shortfall_amount": "0.00",
-            "status": "covered",
-        },
-        {
-            "horizon_days": 60,
-            "window_end_date": "2026-06-06",
-            "scheduled_payments_count": 16,
-            "confirmed_obligations_total": "2200.00",
-            "projected_balance": "-700.00",
-            "safe_to_spend": "0.00",
-            "safe_to_spend_per_day": "0.00",
-            "shortfall_amount": "700.00",
-            "status": "shortfall",
-        },
-        {
-            "horizon_days": 90,
-            "window_end_date": "2026-07-06",
-            "scheduled_payments_count": 25,
-            "confirmed_obligations_total": "3450.00",
-            "projected_balance": "-1950.00",
-            "safe_to_spend": "0.00",
-            "safe_to_spend_per_day": "0.00",
-            "shortfall_amount": "1950.00",
-            "status": "shortfall",
-        },
-    ]
+    assert horizons[1] == {
+        "month_offset": 1,
+        "month_label": "Aug 2026",
+        "days_in_window": 31,
+        "scheduled_payments_count": 0,
+        "confirmed_obligations_total": "0.00",
+        "projected_balance": "1000.00",
+        "safe_to_spend": "1000.00",
+        "safe_to_spend_per_day": "32.26",
+        "shortfall_amount": "0.00",
+        "status": "covered",
+    }
+    assert horizons[2] == {
+        "month_offset": 2,
+        "month_label": "Sep 2026",
+        "days_in_window": 30,
+        "scheduled_payments_count": 0,
+        "confirmed_obligations_total": "0.00",
+        "projected_balance": "1000.00",
+        "safe_to_spend": "1000.00",
+        "safe_to_spend_per_day": "33.33",
+        "shortfall_amount": "0.00",
+        "status": "covered",
+    }
+
+    safe_to_spend = data["safe_to_spend"]
+    assert safe_to_spend["month_offset"] == 0
+    assert safe_to_spend["month_label"] == "Jul 2026"
+    assert safe_to_spend["days_in_window"] == 17
+    assert safe_to_spend["projected_balance"] == "1000.00"
+    assert safe_to_spend["safe_to_spend"] == "1000.00"
+    assert safe_to_spend["safe_to_spend_per_day"] == "58.82"
 
 
-def test_safe_to_spend_counts_overdue_and_future_recurrences_inside_horizon(
+def test_cashflow_forecast_excludes_overdue_and_includes_same_day_obligation(
     client,
     monkeypatch,
 ):
-    cleanup = client.delete("/users/me")
-    assert cleanup.status_code in (204, 404)
-
-    create_configured_user(client, timezone_name="America/Bogota")
-    default_account = client.get("/financial-accounts/").json()[0]
+    default_account = setup_user_with_balance(client, monkeypatch, date(2026, 7, 15))
     fixed_costs = create_category(client, name="Fixed costs", direction="expense")
-
-    opening_balance = client.post(
-        "/adjustments/",
-        json={
-            "financial_account_id": default_account["id"],
-            "balance_direction": "in",
-            "amount": "300.00",
-            "currency": "COP",
-            "description": "Opening balance",
-            "occurred_at": "2026-04-01T12:00:00Z",
-        },
-    )
-    assert opening_balance.status_code == 200
 
     create_obligation(
         client,
-        name="Rent",
+        name="Overdue",
+        amount="100.00",
+        cadence="monthly",
+        next_due_date="2026-07-10",
+        category_id=fixed_costs["id"],
+        expected_financial_account_id=default_account["id"],
+    )
+    create_obligation(
+        client,
+        name="Today",
         amount="200.00",
         cadence="monthly",
-        next_due_date="2026-03-05",
+        next_due_date="2026-07-15",
         category_id=fixed_costs["id"],
         expected_financial_account_id=default_account["id"],
     )
 
-    monkeypatch.setattr(
-        "app.services.cashflow_service.resolve_obligation_reference_date",
-        lambda _: date(2026, 4, 7),
+    response = client.get("/cashflow/forecast")
+    assert response.status_code == 200
+
+    window_0 = response.json()["horizons"][0]
+    assert window_0["scheduled_payments_count"] == 1
+    assert window_0["confirmed_obligations_total"] == "200.00"
+    assert window_0["projected_balance"] == "800.00"
+
+
+def test_safe_to_spend_per_day_partial_month(client, monkeypatch):
+    setup_user_with_balance(
+        client,
+        monkeypatch,
+        date(2026, 7, 20),
+        balance="3000.00",
     )
 
-    response = client.get("/cashflow/safe-to-spend?horizon_days=45")
+    response = client.get("/cashflow/safe-to-spend?month_offset=0")
     assert response.status_code == 200
-    assert response.json() == {
-        "reference_date": "2026-04-07",
-        "horizon_days": 45,
-        "window_end_date": "2026-05-22",
-        "currency": "COP",
-        "current_balance": "300.00",
-        "scheduled_payments_count": 3,
-        "confirmed_obligations_total": "600.00",
-        "projected_balance": "-300.00",
-        "safe_to_spend": "0.00",
-        "safe_to_spend_per_day": "0.00",
-        "shortfall_amount": "300.00",
-        "status": "shortfall",
-    }
+
+    data = response.json()
+    assert data["month_offset"] == 0
+    assert data["month_label"] == "Jul 2026"
+    assert data["days_in_window"] == 12
+    assert data["projected_balance"] == "3000.00"
+    assert data["safe_to_spend"] == "3000.00"
+    assert data["safe_to_spend_per_day"] == "250.00"
+
+
+def test_safe_to_spend_per_day_full_month(client, monkeypatch):
+    setup_user_with_balance(
+        client,
+        monkeypatch,
+        date(2026, 7, 1),
+        balance="3100.00",
+    )
+
+    response = client.get("/cashflow/safe-to-spend?month_offset=1")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["month_offset"] == 1
+    assert data["month_label"] == "Aug 2026"
+    assert data["days_in_window"] == 31
+    assert data["projected_balance"] == "3100.00"
+    assert data["safe_to_spend"] == "3100.00"
+    assert data["safe_to_spend_per_day"] == "100.00"
+
+
+def test_safe_to_spend_rejects_invalid_month_offset(client):
+    response = client.get("/cashflow/safe-to-spend?month_offset=12")
+    assert response.status_code == 422
