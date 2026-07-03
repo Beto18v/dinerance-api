@@ -36,6 +36,17 @@ async def lifespan(_: FastAPI):
     from app.models.transaction import Transaction  # noqa: F401
     from app.models.exchange_rate import ExchangeRate  # noqa: F401
 
+    # Run Alembic migrations in non-test environments
+    if os.getenv("TESTING", "").lower() not in {"1", "true", "yes"}:
+        try:
+            from alembic.config import Config
+            from alembic import command
+
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+        except Exception as exc:
+            print(f"[lifespan] Alembic migration failed: {exc}", flush=True)
+
     # Schema should be managed by Alembic. For local/dev-only convenience you can enable:
     # AUTO_CREATE_TABLES=true
     if os.getenv("AUTO_CREATE_TABLES", "").lower() in {"1", "true", "yes"}:
