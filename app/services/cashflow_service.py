@@ -209,6 +209,7 @@ def _expand_scheduled_payments(
                 due_date=due_date,
                 monthly_anchor_day=obligation.monthly_anchor_day,
                 monthly_anchor_is_month_end=obligation.monthly_anchor_is_month_end,
+                cadence_months=obligation.cadence_months,
             )
 
     scheduled_payments.sort(key=lambda item: (item.due_date, item.obligation_id))

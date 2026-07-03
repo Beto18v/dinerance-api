@@ -12,16 +12,18 @@ def advance_due_date(
     due_date: date,
     monthly_anchor_day: int | None = None,
     monthly_anchor_is_month_end: bool = False,
+    cadence_months: int | None = None,
 ) -> date:
     if cadence == ObligationCadence.weekly:
         return due_date.fromordinal(due_date.toordinal() + 7)
     if cadence == ObligationCadence.biweekly:
         return due_date.fromordinal(due_date.toordinal() + 14)
 
+    step = cadence_months if cadence_months is not None else 1
     next_month_year, next_month = _shift_month(
         due_date.year,
         due_date.month,
-        1,
+        step,
     )
     if monthly_anchor_is_month_end:
         return date(

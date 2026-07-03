@@ -103,6 +103,11 @@ class Obligation(Base):
         server_default=text("false"),
     )
 
+    cadence_months = Column(
+        Integer,
+        nullable=True,
+    )
+
     status = Column(
         Enum(ObligationStatus),
         nullable=False,
@@ -144,6 +149,13 @@ class Obligation(Base):
             )
             """,
             name="ck_obligations_monthly_anchor",
+        ),
+        CheckConstraint(
+            """
+            cadence_months IS NULL
+            OR cadence_months >= 1
+            """,
+            name="ck_obligations_cadence_months_positive",
         ),
         Index(
             "idx_obligations_user_status_due",

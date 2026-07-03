@@ -96,6 +96,7 @@ def create_obligation(
         monthly_anchor_day=monthly_anchor_day,
         monthly_anchor_is_month_end=monthly_anchor_is_month_end,
         status=obligation_data.status,
+        cadence_months=obligation_data.cadence_months,
     )
     db.add(obligation)
     db.commit()
@@ -221,6 +222,9 @@ def update_obligation(
         if updates["next_due_date"] is None:
             raise HTTPException(status_code=422, detail="Next due date is required")
         obligation.next_due_date = updates["next_due_date"]
+
+    if "cadence_months" in updates:
+        obligation.cadence_months = updates["cadence_months"]
 
     _ensure_obligation_currency_is_supported(
         user_base_currency=user.base_currency,
@@ -498,6 +502,7 @@ def serialize_obligation(
         days_until_due=days_until_due,
         expected_account_current_balance=expected_balance,
         expected_account_shortfall_amount=expected_shortfall,
+        cadence_months=obligation.cadence_months,
         created_at=obligation.created_at,
         updated_at=obligation.updated_at,
     )
@@ -513,6 +518,7 @@ def advance_obligation_due_date(obligation: Obligation) -> date:
         due_date=obligation.next_due_date,
         monthly_anchor_day=obligation.monthly_anchor_day,
         monthly_anchor_is_month_end=obligation.monthly_anchor_is_month_end,
+        cadence_months=obligation.cadence_months,
     )
 
 

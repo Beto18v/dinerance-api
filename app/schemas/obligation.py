@@ -59,6 +59,7 @@ class ObligationCreate(BaseModel):
     expected_financial_account_id: UUID | None = None
     source_recurring_candidate_key: str | None = None
     status: ObligationStatus = ObligationStatus.active
+    cadence_months: int | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -88,6 +89,7 @@ class ObligationUpdate(BaseModel):
     category_id: UUID | None = None
     expected_financial_account_id: UUID | None = None
     status: ObligationStatus | None = None
+    cadence_months: int | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -119,6 +121,7 @@ class ObligationRead(BaseModel):
     days_until_due: int
     expected_account_current_balance: Decimal | None = None
     expected_account_shortfall_amount: Decimal | None = None
+    cadence_months: int | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
