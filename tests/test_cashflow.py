@@ -241,6 +241,36 @@ def test_safe_to_spend_per_day_full_month(client, monkeypatch):
     assert data["safe_to_spend_per_day"] == "100.00"
 
 
+def test_cashflow_forecast_accumulates_monthly(client, monkeypatch):
+    """Each month starts from the previous month's projected balance."""
+    default_account = setup_user_with_balance(
+        client, monkeypatch, date(2026, 7, 1), balance="1000.00"
+    )
+    fixed_costs = create_category(client, name="Fixed costs", direction="expense")
+    create_obligation(
+        client,
+        name="Rent",
+        amount="300.00",
+        cadence="monthly",
+        next_due_date="2026-07-05",
+        category_id=fixed_costs["id"],
+        expected_financial_account_id=default_account["id"],
+    )
+
+    response = client.get("/cashflow/forecast")
+    assert response.status_code == 200
+
+    horizons = response.json()["horizons"]
+    assert len(horizons) == 3
+
+    # Jul: 1000 - 300 = 700
+    assert horizons[0]["projected_balance"] == "700.00"
+    # Aug: 700 - 300 = 400
+    assert horizons[1]["projected_balance"] == "400.00"
+    # Sep: 400 - 300 = 100
+    assert horizons[2]["projected_balance"] == "100.00"
+
+
 def test_safe_to_spend_rejects_invalid_month_offset(client):
     response = client.get("/cashflow/safe-to-spend?month_offset=12")
     assert response.status_code == 422

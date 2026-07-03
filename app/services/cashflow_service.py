@@ -54,16 +54,20 @@ def get_cashflow_forecast(
         window_end_date=max_window_end,
     )
 
-    horizons = [
-        _build_monthly_forecast_window(
-            current_balance=current_balance,
+    # Build windows sequentially — each month starts from the previous
+    # month's projected balance so the forecast is cumulative.
+    running_balance = current_balance
+    horizons: list[ForecastWindowRead] = []
+    for month_offset, window in enumerate(windows):
+        forecast = _build_monthly_forecast_window(
+            current_balance=running_balance,
             reference_date=resolved_reference_date,
             month_offset=month_offset,
             window=window,
             scheduled_payments=scheduled_payments,
         )
-        for month_offset, window in enumerate(windows)
-    ]
+        horizons.append(forecast)
+        running_balance = forecast.projected_balance
 
     return CashflowForecastRead(
         reference_date=resolved_reference_date,
